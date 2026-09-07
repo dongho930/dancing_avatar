@@ -50,6 +50,12 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": app.version,
                 "store": getattr(store, "backend_name", "memory")}
 
+    @app.get("/", include_in_schema=False)
+    def root():
+        # 루트 접속 시 프론트로 이동 (빈 화면/Not Found 방지)
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/app", status_code=307)
+
     # 프론트 정적 서빙 (앱 WebView용: /app → index.html)
     # frontend/가 있으면 디렉토리 서빙, 없으면 루트 index.html 단일 서빙
     root_dir = os.path.dirname(os.path.dirname(__file__))
