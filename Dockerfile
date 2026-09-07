@@ -4,9 +4,15 @@ FROM python:3.11-slim
 # - opencv-headless는 libglib만 필요 (libgl 불필요)
 # - ffmpeg apt 패키지 제거: 다운로드는 progressive mp4(merge 불필요),
 #   오디오는 imageio-ffmpeg 동봉 바이너리 사용
+# - Deno: yt-dlp n-challenge(ejs) 실행용. 없으면 유튜브가 403으로 차단.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 curl \
+    libglib2.0-0 curl unzip \
  && rm -rf /var/lib/apt/lists/*
+ARG DENO_VERSION=2.1.4
+RUN curl -fsSL -o /tmp/deno.zip https://dl.deno.land/release/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip \
+ && unzip -q /tmp/deno.zip -d /usr/local/bin \
+ && rm /tmp/deno.zip \
+ && deno --version
 
 WORKDIR /srv
 COPY requirements.txt .
