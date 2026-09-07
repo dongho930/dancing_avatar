@@ -37,6 +37,8 @@ async function processYoutube() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('progress').style.display = 'none';
         document.getElementById('bvh-btn').disabled = false;
+        lastMotion = motion;
+        document.getElementById('replay-btn').disabled = false;
         // 원본 음원이 있으면 아바타 재생과 함께 재생 (동일 길이라 싱크 일치)
         if ((st.formats || []).includes('audio')) {
           const key = apiKeyParam();
@@ -66,4 +68,11 @@ async function processYoutube() {
       console.error('[DEBUG] fetch 실패:', err);
     }
   }
+}
+
+function replayMotion() {
+  if (!lastMotion) return alert('먼저 안무 따기로 안무를 추출하세요.');
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('progress').style.display = 'none';
+  playMotion(lastMotion);
 }

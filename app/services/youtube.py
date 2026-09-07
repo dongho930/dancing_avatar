@@ -8,9 +8,14 @@ from collections.abc import Callable
 
 
 def build_base_opts(outtmpl: str) -> dict:
+    fmt = os.getenv("YTDL_FORMAT", "").strip()
+    if not fmt:
+        # Free Tier 기본: progressive mp4 우선 (별도 merge 불필요 → apt ffmpeg 불필요,
+        # CPU/RAM 절감). 고화질 분리 스트림이 필요하면 YTDL_FORMAT으로 재정의.
+        maxh = os.getenv("YTDL_MAX_HEIGHT", "720").strip() or "720"
+        fmt = f"best[height<={maxh}][ext=mp4]/best[ext=mp4]/best"
     return {
-        # AV1 제외 H.264 우선 (서버에 AV1 하드웨어 디코더가 없다는 전제 유지)
-        'format': 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo*+bestaudio/best',
+        'format': fmt,
         'merge_output_format': 'mp4',
         'outtmpl': outtmpl,
         'quiet': False,

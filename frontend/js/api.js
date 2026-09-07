@@ -73,6 +73,10 @@ async function legacyProcessYoutube(url, BACKEND_URL) {
     if (!response.ok) { alert(`서버 에러 (status: ${response.status})`); return; }
     const resData = JSON.parse(rawText);
     document.getElementById('loading').style.display = 'none';
-    if (resData && resData.status === 'success') playMotion(resData.data);
+    if (resData && resData.status === 'success') {
+      lastMotion = resData.data;
+      document.getElementById('replay-btn').disabled = false;
+      playMotion(resData.data);
+    }
     else alert('모션 추출 실패');
 }

@@ -1,0 +1,38 @@
+# Render Blueprint: Free Tier 최적값.
+# 대시보드 → New → Blueprint → 이 저장소 선택, 또는 render.yaml 수동 대응.
+services:
+  - type: web
+    name: dancing-avarta
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: STORE_BACKEND
+        value: memory # Free에는 외부 Redis/PG 없이 인메모리 (슬립 시 잡 소멸)
+      - key: TMP_DIR
+        value: /tmp # ephemeral. 영속 저장 필요시 디스크(유료) + S3_* 설정
+      - key: MAX_FRAMES
+        value: 300 # 30fps*10초. 512MB/shared CPU에서 안정 처리 상한
+      - key: FRAMES_PAGE_MAX
+        value: 60
+      - key: JOB_TTL_SEC
+        value: 1800
+      - key: ENABLE_HANDS
+        value: 0 # 손 모델 2차 추론 OFF (CPU/RAM 절약). 필요시 1
+      - key: MAX_POSES
+        value: 1 # 다인 검출 OFF (target=auto 전제)
+      - key: YTDL_MAX_HEIGHT
+        value: 720 # 720p progressive mp4 우선 (merge 불필요, 디코딩 부하 절감)
+      - key: AUDIO_ENABLED
+        value: 1
+      - key: GENVIDEO_BACKEND
+        value: mock
+      - key: RATE_LIMIT_CREATE_PER_MIN
+        value: 10
+      - key: RATE_LIMIT_READ_PER_MIN
+        value: 120
+      - key: CORS_ORIGINS
+        value: "*"
+      # 유튜브 쿠키 필요시 대시보드 Environment → Secret File 대신 아래 추가:
+      # - key: COOKIES_B64
+      #   sync: false

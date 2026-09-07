@@ -14,12 +14,7 @@ def _ensure_root(payload: dict) -> dict:
     """구 저장분(루트 없음) 호환: 첫 프레임에 root가 없으면 그 자리에서 계산."""
     frames = payload.get("frames", [])
     if frames and "root" not in frames[0] and "rt" not in frames[0]:
-        # root가 없으면 기본값으로 채움
-        for f in payload.get("frames", []):
-            if "root" not in f:
-                f["root"] = [0.0, 0.0, 0.0]
-            if "rt" not in f:
-                f["rt"] = [0.0, 0.0, 0.0]
+        attach_root(payload)
     return payload
 
 

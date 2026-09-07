@@ -20,6 +20,7 @@ function _playMedia(el) {
   return true;
 }
 function playMotion(motionData) {
+  if (window.__playTimer) { try { clearInterval(window.__playTimer); } catch (e) {} window.__playTimer = null; }
   let frameIdx = 0;
   const interval = 1000 / (motionData.fps || 30);
   const audio = document.getElementById('dance-audio');
@@ -29,9 +30,10 @@ function playMotion(motionData) {
   _playMedia(useAudio ? audio : null);
   _playMedia(useRef ? refvid : null);
 
-  const timer = setInterval(() => {
+  const timer = window.__playTimer = setInterval(() => {
     if (frameIdx >= motionData.frames.length) {
       clearInterval(timer);
+      if (window.__playTimer === timer) window.__playTimer = null;
       if (useAudio) { try { audio.pause(); } catch (e) {} }
       if (useRef) { try { refvid.pause(); } catch (e) {} }
       return;

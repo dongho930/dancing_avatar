@@ -32,6 +32,7 @@ function apiKeyParam() {
 }
 
 let lastJob = null;
+let lastMotion = null;
 
 function setProgress(pct, msg) {
   const bar = document.getElementById('progress');

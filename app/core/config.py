@@ -13,10 +13,10 @@ class Settings:
     host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
     cors_origins: list[str] = field(default_factory=lambda: _getlist("CORS_ORIGINS", "*"))
-    tmp_dir: str = field(default_factory=lambda: os.getenv("TMP_DIR", "tmp"))
-    job_ttl_sec: int = field(default_factory=lambda: int(os.getenv("JOB_TTL_SEC", "3600")))
+    tmp_dir: str = field(default_factory=lambda: os.getenv("TMP_DIR", "/tmp" if os.getenv("RENDER") else "tmp"))
+    job_ttl_sec: int = field(default_factory=lambda: int(os.getenv("JOB_TTL_SEC", "1800")))
     cookies_path: str = field(default_factory=lambda: os.getenv("COOKIES_PATH", "cookies.txt"))
-    max_frames: int = field(default_factory=lambda: int(os.getenv("MAX_FRAMES", "900")))  # 30fps*30s
+    max_frames: int = field(default_factory=lambda: int(os.getenv("MAX_FRAMES", "300")))  # 30fps*10s (Free Tier 안정 상한)
     frame_stride_default: int = field(default_factory=lambda: int(os.getenv("FRAME_STRIDE", "1")))
     # 모바일 페이로드 보호: 한 페이지 최대 프레임
     frames_page_max: int = field(default_factory=lambda: int(os.getenv("FRAMES_PAGE_MAX", "120")))

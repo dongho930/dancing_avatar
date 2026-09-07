@@ -1,19 +1,20 @@
-# ---- 필수 (핵심 파이프라인) ----
+# ---- 필수 (핵심 파이프라인, Render Free Tier 최소 구성) ----
 fastapi>=0.110
-uvicorn[standard]>=0.29
+uvicorn>=0.29
+websockets>=12.0  # /ws용. uvicorn[standard] 대신 최소 조합 (빌드 경량화)
 yt-dlp>=2024.8.6
 mediapipe>=1.0  # 1.0+는 Tasks API(PoseLandmarker) 사용, solutions API 없음
 opencv-python-headless>=4.9
 pydantic>=2.6
 numpy>=1.26
-# ---- 선택 (없어도 memory+파일 모드로 동작, lazy import) ----
+# 원본 음원 추출용 (ffmpeg 동봉, 시스템 설치 불필요):
+imageio-ffmpeg>=0.5
+# ---- 선택 (미설치 시 자동 폴백, lazy import) ----
 # 저장소/시크릿 다원화용:
-redis>=5.0
-psycopg[binary]>=3.1
-boto3>=1.34
+# redis>=5.0
+# psycopg[binary]>=3.1
+# boto3>=1.34
 # 생성형 영상 API용: pip install replicate + REPLICATE_API_TOKEN
 # replicate>=0.30
 # 얼굴 매칭용: pip install insightface (수백 MB)
 # insightface>=0.7
-# 원본 음원 추출용 (ffmpeg 동봉, 시스템 설치 불필요):
-imageio-ffmpeg>=0.5

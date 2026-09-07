@@ -172,3 +172,27 @@ chmod +x start.sh
 - MediaPipe로 추출한 원시 관절 좌표는 프레임 간 노이즈가 있어, 3D 아바타에
   그대로 입히면 부자연스러운 움직임이 나올 수 있습니다. 프론트엔드에서
   스무딩(slerp)과 관절 각도 제한, visibility 필터링으로 완화하고 있습니다.
+
+---
+
+## Render Free Tier 배포
+
+`render.yaml` Blueprint 기준 최적값이 들어 있습니다.
+
+```bash
+# 대시보드 → New → Blueprint → 이 저장소 선택
+```
+
+핵심 조정 (Free 512MB/shared CPU 기준):
+
+- `STORE_BACKEND=memory`, `TMP_DIR=/tmp` — 외부 DB/디스크 없이 동작 (슬립 시 잡 소멸)
+- `MAX_FRAMES=300` (10초), `YTDL_MAX_HEIGHT=720` progressive mp4 — 디코딩/RAM 부하 절감
+- `ENABLE_HANDS=0`, `MAX_POSES=1` — 2차 모델/다인 검출 OFF
+- 단일 워커 (`--workers 1`), `UVICORN_RELOAD` 비활성화, `/health` 헬스체크
+- 쿠키 필요시 대시보드에서 `COOKIES_B64` Secret 추가 (파일 마운트 불필요)
+
+제약:
+
+- 슬립(15분 무활동) 시 진행 중 잡은 소멸. 처리 중에는 헬스체크가 느려질 수 있어
+  동시 1잡 권장.
+- 영속 저장 필요시 유료 디스크 + `S3_*` 설정으로 교체.
