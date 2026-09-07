@@ -31,6 +31,9 @@ def download_youtube(url: str, out_path: str, cookies_path: str = "cookies.txt",
 
     # cookies_path가 비어있으면(시크릿 없음) cookiefile 옵션 자체를 생략한다
     effective_cookies = cookies_path if cookies_path and os.path.exists(cookies_path) else ""
+    # 진단용 (값 노출 없음): 쿠키 적용 여부 + 버전만 로그
+    print(f"[youtube] yt-dlp {getattr(yt_dlp, '__version__', '?')}, "
+          f"cookies={'ON' if effective_cookies else 'OFF'}", flush=True)
 
     base = build_base_opts(out_path)
     attempt_1 = {**base, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}}
