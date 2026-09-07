@@ -3,6 +3,7 @@ fastapi>=0.110
 uvicorn>=0.29
 websockets>=12.0  # /ws용. uvicorn[standard] 대신 최소 조합 (빌드 경량화)
 yt-dlp>=2024.8.6
+bgutil-ytdlp-pot-provider>=1.3  # PO Token 플러그인 (Deno 스크립트 모드, 서버 불필요)
 mediapipe>=1.0  # 1.0+는 Tasks API(PoseLandmarker) 사용, solutions API 없음
 opencv-python-headless>=4.9
 pydantic>=2.6

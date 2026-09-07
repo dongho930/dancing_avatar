@@ -8,11 +8,19 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 curl unzip \
  && rm -rf /var/lib/apt/lists/*
-ARG DENO_VERSION=2.1.4
+# Deno: yt-dlp n-challenge(요구 >=2.3) + PO Token 스크립트(요구 >=2.4.3) 실행용
+ARG DENO_VERSION=2.4.3
 RUN curl -fsSL -o /tmp/deno.zip https://dl.deno.land/release/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip \
  && unzip -q /tmp/deno.zip -d /usr/local/bin \
  && rm /tmp/deno.zip \
  && deno --version
+# bgutil PO Token 서버 소스 (script 모드: 별도 Node 서버 없이 Deno로 직접 실행)
+# npm/nodejs/git은 빌드시에만 사용 후 제거해 이미지 경량 유지
+RUN apt-get update && apt-get install -y --no-install-recommends git nodejs npm \
+ && git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /srv/bgutil-ytdlp-pot-provider \
+ && cd /srv/bgutil-ytdlp-pot-provider/server && npm ci \
+ && apt-get purge -y git nodejs npm && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
 
 WORKDIR /srv
 COPY requirements.txt .

@@ -36,8 +36,14 @@ def download_youtube(url: str, out_path: str, cookies_path: str = "cookies.txt",
           f"cookies={'ON' if effective_cookies else 'OFF'}", flush=True)
 
     base = build_base_opts(out_path)
-    attempt_1 = {**base, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}}
-    attempt_2 = {**base, 'extractor_args': {'youtube': {'player_client': ['web', 'tv', 'mweb']}}}
+    # PO Token 스크립트 모드: 번들된 bgutil 서버 소스를 Deno로 직접 실행.
+    # 디렉터리가 없으면(로컬 등) 조용히 생략 → 기존 동작 유지.
+    pot_args: dict = {}
+    server_home = os.getenv("BGUTIL_SERVER_HOME", "/srv/bgutil-ytdlp-pot-provider/server")
+    if server_home and os.path.isdir(server_home):
+        pot_args = {"youtubepot-bgutilscript": {"server_home": server_home}}
+    attempt_1 = {**base, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}, **pot_args}}
+    attempt_2 = {**base, 'extractor_args': {'youtube': {'player_client': ['web', 'tv', 'mweb']}, **pot_args}}
     if effective_cookies:
         attempt_2['cookiefile'] = effective_cookies
 
