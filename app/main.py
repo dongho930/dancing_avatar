@@ -56,6 +56,12 @@ def create_app() -> FastAPI:
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/app", status_code=307)
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        # 브라우저 자동 요청. 204로 조용히 응답해 로그 404 소음 제거.
+        from fastapi.responses import Response
+        return Response(status_code=204)
+
     # 프론트 정적 서빙 (앱 WebView용: /app → index.html)
     # frontend/가 있으면 디렉토리 서빙, 없으면 루트 index.html 단일 서빙
     root_dir = os.path.dirname(os.path.dirname(__file__))

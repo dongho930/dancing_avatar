@@ -8,18 +8,28 @@ from app.core.config import get_settings
 from app.core.secrets import ensure_cookies_file
 from app.store import store
 from app.services.pose import process_video_pose
-from app.services.youtube import download_youtube
+from app.services.youtube import download_cached
 
 
 def step_download(ctx: dict) -> None:
+    import shutil
     settings = get_settings()
     cookies = ensure_cookies_file(settings.cookies_b64, settings.cookies_secret_file,
                                   settings.cookies_path, settings.tmp_dir)
+    preview_ttl = int(os.getenv("PREVIEW_TTL_SEC", "3600"))
     ctx["tmp_path"] = os.path.join(settings.tmp_dir, f"dl_{ctx['job_id']}.mp4")
     store.update(ctx["job_id"], status="downloading", progress=5, message="유튜브 다운로드 중")
-    ctx["video_path"] = download_youtube(
-        ctx["url"], ctx["tmp_path"], cookies_path=cookies,
+    cached, reused = download_cached(
+        ctx["url"], settings.tmp_dir, ttl_sec=preview_ttl, cookies_path=cookies,
         progress_cb=lambda m: store.update(ctx["job_id"], message=m))
+    if reused:
+        shutil.copy2(cached, ctx["tmp_path"])
+        ctx["video_path"] = ctx["tmp_path"]
+    else:
+        if os.path.exists(ctx["tmp_path"]):
+            os.remove(ctx["tmp_path"])
+        os.replace(cached, ctx["tmp_path"])
+        ctx["video_path"] = ctx["tmp_path"]
 
 
 def step_extract(ctx: dict) -> None:
@@ -30,9 +40,12 @@ def step_extract(ctx: dict) -> None:
         pct = 30 + min(65, int(done / max(cap, 1) * 65))
         store.update(ctx["job_id"], progress=pct, message=f"관절 추출 중 ({done}프레임)")
 
+    if ctx.get("target") == "point" and not ctx.get("target_point"):
+        raise RuntimeError("target=point인데 선택 좌표(target_point)가 없습니다. 미리보기에서 대상을 먼저 선택하세요")
     ctx["result"] = process_video_pose(
         ctx["video_path"], max_frames=settings.max_frames, progress_cb=on_pose,
-        target=ctx["target"], ref_image_b64=ctx["ref_image_b64"])
+        target=ctx["target"], ref_image_b64=ctx["ref_image_b64"],
+        target_point=ctx.get("target_point"))
 
 
 def step_enrich(ctx: dict) -> None:

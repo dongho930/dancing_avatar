@@ -51,6 +51,23 @@ async function pollGenVideo(base, jobId) {
   }
   return null;
 }
+async function createPreview(base, url) {
+  const r = await fetch(`${base}/api/v1/previews`, {
+    method: 'POST', headers: apiHeaders(), body: JSON.stringify({ url })
+  });
+  if (r.status === 401) throw new Error('need-api-key');
+  if (!r.ok) throw new Error('preview-create-failed: ' + r.status);
+  return r.json();
+}
+async function fetchPreviewStatus(base, previewId) {
+  const r = await fetch(`${base}/api/v1/previews/${previewId}`, { headers: apiHeaders() });
+  if (!r.ok) throw new Error('preview-status-failed: ' + r.status);
+  return r.json();
+}
+function previewFrameUrl(base, previewId) {
+  const key = apiKeyParam();
+  return `${base}/api/v1/previews/${previewId}/frame${key ? '?api_key=' + encodeURIComponent(key) : ''}`;
+}
 async function downloadBVH() {
   if (!lastJob) return alert('먼저 안무를 변환하세요.');
   const base = getBackendUrl();

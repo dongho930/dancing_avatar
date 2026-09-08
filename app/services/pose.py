@@ -2,7 +2,7 @@
 
 target: auto(1명 전제) | left | center | right | face(기준사진 필요)
 반환: {fps, total_frames, img_w, img_h, target:{mode,label,persons_max},
-       frames:[{frame,timestamp,poseWorldLandmarks,poseLandmarks,hands,persons,lost}]}
+       frames:[{frame,timestamp,poseWorldLandmarks,poseLandmarks,hands,persons,lost,flow_filled,silhouette,depth}]}
 얼굴 표정은 의도적으로 미지원.
 """
 import os
@@ -15,13 +15,15 @@ from app.services.detect import (
     ensure_pose_model,
     null_context,
 )
+from app.services.flow import MIN_VALID, advect_points, compute_flow, flow_enabled, small_gray
 from app.services.tracking import Tracker, _person_entries, assign_hands
 
 
 def process_video_pose(video_path: str, max_frames: int = 900,
                        progress_cb: Callable[[int, int], None] | None = None,
                        target: str = "auto",
-                       ref_image_b64: str | None = None) -> dict:
+                       ref_image_b64: str | None = None,
+                       target_point=None) -> dict:
     import cv2
     import mediapipe as mp
 
@@ -34,8 +36,9 @@ def process_video_pose(video_path: str, max_frames: int = 900,
     from app.core.config import get_settings
     settings = get_settings()
     # 대상 지정: auto면 1명만 검출(기존 속도), 그 외는 다인 검출+추적
-    multi = target in ("left", "center", "right", "face")
+    multi = target in ("left", "center", "right", "face", "point")
     max_poses = max(1, int(os.getenv("MAX_POSES", "4"))) if multi else 1
+    sil_on = os.getenv("SILHOUETTE_ENABLED", "1").strip() not in ("0", "false", "no")
     options = mp_vision.PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=ensure_pose_model(settings.tmp_dir)),
         running_mode=mp_vision.RunningMode.VIDEO,
@@ -43,6 +46,7 @@ def process_video_pose(video_path: str, max_frames: int = 900,
         min_pose_detection_confidence=0.5,
         min_pose_presence_confidence=0.5,
         min_tracking_confidence=0.5,
+        output_segmentation_masks=sil_on,
     )
     enable_hands = os.getenv("ENABLE_HANDS", "1").strip() not in ("0", "false", "no")
     max_hands = int(os.getenv("MAX_HANDS", "2"))
@@ -71,7 +75,11 @@ def process_video_pose(video_path: str, max_frames: int = 900,
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     img_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1.0
     img_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1.0
-    tracker = Tracker(target if multi else "auto")
+    tracker = Tracker(target if multi else "auto", target_point=target_point)
+    flow_on = flow_enabled()
+    prev_gray = None
+    prev_lms2d = None
+    prev_lms3d = None
     motion_data: list[dict] = []
     frame_idx = 0
     try:
@@ -86,10 +94,32 @@ def process_video_pose(video_path: str, max_frames: int = 900,
                     image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
                     ts_ms = int(frame_idx / fps * 1000) if fps > 0 else frame_idx * 33
-                    lms2d, lms3d = detect_poses(landmarker, mp_image, ts_ms)
+                    gray, _, _ = small_gray(frame) if flow_on else (None, 0, 0)
+                    if sil_on:
+                        from app.services.detect import detect_poses_with_masks, silhouette_from_mask
+                        lms2d, lms3d, masks = detect_poses_with_masks(landmarker, mp_image, ts_ms)
+                    else:
+                        lms2d, lms3d = detect_poses(landmarker, mp_image, ts_ms)
+                        masks = []
                     persons = _person_entries(lms2d, lms3d)
                     lms3d_pick, lms2d_pick, pick, lost = tracker.update(
                         persons, image_rgb, ref_emb)
+                    sil = None
+                    if sil_on and pick is not None and pick < len(masks):
+                        sil = silhouette_from_mask(masks[pick])
+                    dep = None
+                    if lms2d_pick:
+                        from app.services.depth import depth_enabled, estimate_depth, sample_hip_depth
+                        if depth_enabled():
+                            dep = sample_hip_depth(estimate_depth(image_rgb), lms2d_pick)
+                    flow_filled = False
+                    if flow_on and not lms2d_pick and prev_lms2d and prev_gray is not None:
+                        adv, n_valid = advect_points(
+                            prev_lms2d, compute_flow(prev_gray, gray))
+                        if n_valid >= MIN_VALID:
+                            lms2d_pick = adv
+                            lms3d_pick = prev_lms3d or []
+                            flow_filled = True
                     hand_entries = detect_hands(hands, mp_image, ts_ms) if hands is not None else []
                     if multi and persons:
                         hand_entries = assign_hands(hand_entries, persons, pick)
@@ -101,7 +131,15 @@ def process_video_pose(video_path: str, max_frames: int = 900,
                         "hands": hand_entries,
                         "persons": len(persons),
                         "lost": lost,
+                        "flow_filled": flow_filled,
+                        "silhouette": sil,
+                        "depth": dep,
                     })
+                    if flow_on:
+                        prev_gray = gray
+                        if lms2d_pick:
+                            prev_lms2d = lms2d_pick
+                            prev_lms3d = lms3d_pick
                     frame_idx += 1
                     if progress_cb and frame_idx % 30 == 0:
                         progress_cb(frame_idx, max_frames)

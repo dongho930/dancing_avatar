@@ -48,6 +48,8 @@ loader.load('https://threejs.org/examples/models/gltf/Xbot.glb', (gltf) => {
       put(['neck'], 'Neck');
       put(['head'], 'Head');
       put(['hips'], 'Hips');
+      put(['leftshoulder'], 'LeftShoulder');
+      put(['rightshoulder'], 'RightShoulder');
       put(['leftarm'], 'LeftUpperArm');
       put(['leftforearm'], 'LeftLowerArm');
       put(['rightarm'], 'RightUpperArm');

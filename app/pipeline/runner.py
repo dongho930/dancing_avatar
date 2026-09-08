@@ -7,10 +7,12 @@ from app.pipeline import steps
 
 def run_motion_job(job_id: str, url: str,
                    target: str = "auto", ref_image_b64: str = "",
-                   render: str = "avatar", char_image_b64: str = "") -> None:
+                   render: str = "avatar", char_image_b64: str = "",
+                   target_point=None) -> None:
     ctx = {"job_id": job_id, "url": url, "target": target,
            "ref_image_b64": ref_image_b64 or "", "render": render,
-           "char_image_b64": char_image_b64 or ""}
+           "char_image_b64": char_image_b64 or "",
+           "target_point": target_point}
     try:
         steps.step_download(ctx)
         steps.step_extract(ctx)

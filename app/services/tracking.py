@@ -46,6 +46,19 @@ def _pick_initial(persons: list, mode: str) -> int | None:
     return min(range(len(persons)), key=lambda i: abs(persons[i]["center"][0] - 0.5))
 
 
+def _pick_nearest(persons: list, point) -> int | None:
+    """미리보기에서 선택한 점(x, y 정규화)에 가장 가까운 사람."""
+    if not persons or point is None:
+        return None
+    try:
+        px, py = float(point[0]), float(point[1])
+    except (IndexError, TypeError, ValueError):
+        return None
+    return min(range(len(persons)),
+               key=lambda i: (persons[i]["center"][0] - px) ** 2
+                             + (persons[i]["center"][1] - py) ** 2)
+
+
 def _track_cost(p: dict, prev: dict) -> float:
     dc = ((p["center"][0] - prev["center"][0]) ** 2
           + (p["center"][1] - prev["center"][1]) ** 2) ** 0.5
@@ -99,11 +112,126 @@ def match_face(persons: list, frame_rgb, ref_emb, threshold: float) -> tuple[int
     return best, sim
 
 
+class HandTracker:
+    """손 슬롯의 시간 추적. 검출기 라벨 무시, 손목 위치 연속성으로 동일 손 유지.
+
+    정규화 이미지 공간에서 동작. 한 번 잡은 슬롯은 놓치지 않는 한 유지해
+    교차 팔에서도 뒤바뀌지 않는다. 기하 시드는 트랙 없을 때만 사용.
+    """
+
+    def __init__(self, gate: float = 0.02, gap_tol: int = 10) -> None:
+        self.gate = gate  # dist^2 (실측 p90 0.017 → 여유 0.02)
+        self.gap_tol = gap_tol
+        self.slots: dict = {}  # side -> {"pos": (x, y), "vel": (vx, vy), "gap": int}
+
+    @staticmethod
+    def _xy(lms) -> tuple | None:
+        try:
+            if len(lms) < 21:
+                return None
+            return (float(lms[0].get("x", 0.5)), float(lms[0].get("y", 0.5)))
+        except (IndexError, TypeError, ValueError, AttributeError):
+            return None
+
+    def _seed_side(self, x: float, y: float, pose_wrists) -> str | None:
+        if not pose_wrists:
+            return None
+        try:
+            lx, ly = pose_wrists["Left"]
+            rx, ry = pose_wrists["Right"]
+        except (TypeError, KeyError):
+            return None
+        dl = (x - lx) ** 2 + (y - ly) ** 2
+        dr = (x - rx) ** 2 + (y - ry) ** 2
+        if min(dl, dr) > 0.09 or abs(dl - dr) / max(dl + dr, 1e-9) < 0.15:
+            return None
+        return "Left" if dl < dr else "Right"
+
+    @staticmethod
+    def _dist2(ax, ay, bx, by) -> float:
+        return (ax - bx) ** 2 + (ay - by) ** 2
+
+    def _predict(self, st: dict) -> tuple:
+        vx, vy = st.get("vel", (0.0, 0.0))
+        return (st["pos"][0] + vx, st["pos"][1] + vy)
+
+    def assign(self, cands: list, pose_wrists=None, labels: dict | None = None) -> dict:
+        """cands: [(key, x, y)] → {side: key}.
+
+        살아있는 트랙끼리는 전역 최소비용 매칭(동점시 라벨 일치 우선).
+        남는 검출은 기하 시드 → 라벨 순으로 빈 슬롯에.
+        """
+        import itertools
+        # 중복 검출 제거 (같은 손을 두 번 잡은 경우)
+        uniq = []
+        for c in cands:
+            if all(self._dist2(c[1], c[2], u[1], u[2]) > 0.0004 for u in uniq):
+                uniq.append(c)
+        live = [s for s in ("Left", "Right")
+                if self.slots.get(s) and self.slots[s]["gap"] <= self.gap_tol]
+        out: dict = {}
+        if live and uniq:
+            pred = {s: self._predict(self.slots[s]) for s in live}
+            best, best_cost = None, None
+            # live 슬롯들에 대한 전단사 매칭 전부 평가 (최대 2! = 2가지)
+            for perm in itertools.permutations([c[0] for c in uniq], min(len(live), len(uniq))):
+                if len(live) == 2 and len(perm) < 2:
+                    continue
+                mapping = dict(zip(live, perm))
+                cost = sum(self._dist2(*pred[s], *next(c[1:] for c in uniq if c[0] == k))
+                           for s, k in mapping.items())
+                if best is None or cost < best_cost - 1e-9:
+                    best, best_cost = mapping, cost
+                elif abs(cost - best_cost) <= 1e-9 and labels:
+                    # 동점(교차 순간): 라벨 일치 많은 쪽. 그래도 동점이면 기존 유지.
+                    def _score(m):
+                        return sum(1 for s, k in m.items()
+                                   if str(labels.get(k, "")).capitalize() == s)
+                    if _score(mapping) > _score(best):
+                        best, best_cost = mapping, cost
+            if best is not None:
+                # 게이트 밖 매칭은 버림 (급격한 점프 = 다른 손)
+                for s, k in list(best.items()):
+                    pos = next(c[1:] for c in uniq if c[0] == k)
+                    if self._dist2(*self._predict(self.slots[s]), *pos) > self.gate:
+                        del best[s]
+                out.update(best)
+        free = [c for c in uniq if c[0] not in out.values()]
+        # 남은 건 기하 시드 → 라벨 순으로 빈 슬롯에
+        for c in free:
+            if len(out) >= 2:
+                break
+            side = self._seed_side(c[1], c[2], pose_wrists)
+            if side is None and labels:
+                lab = str(labels.get(c[0], "")).capitalize()
+                side = lab if lab in ("Left", "Right") else None
+            if side is None:
+                side = "Left" if "Left" not in out else "Right"
+            if side not in out:
+                out[side] = c[0]
+        # 상태 갱신 (속도 포함)
+        posmap = {c[0]: (c[1], c[2]) for c in uniq}
+        for side in ("Left", "Right"):
+            if side in out and out[side] in posmap:
+                new_pos = posmap[out[side]]
+                prev = self.slots.get(side, {"pos": new_pos, "vel": (0.0, 0.0), "gap": 0})
+                old_pos = prev["pos"]
+                self.slots[side] = {"pos": new_pos,
+                                    "vel": (new_pos[0] - old_pos[0], new_pos[1] - old_pos[1]),
+                                    "gap": 0}
+            else:
+                prev = self.slots.get(side, {"pos": (0.5, 0.5), "vel": (0.0, 0.0), "gap": 0})
+                self.slots[side] = {"pos": prev["pos"], "vel": (0.0, 0.0),
+                                    "gap": prev["gap"] + 1}
+        return out
+
+
 class Tracker:
     """한 영상의 대상 추적 상태. update()마다 (lms3d, lms2d, pick, lost) 반환."""
 
-    def __init__(self, mode: str = "auto") -> None:
+    def __init__(self, mode: str = "auto", target_point=None) -> None:
         self.mode = mode
+        self.target_point = target_point
         self.gate = float(os.getenv("TRACK_GATE", "0.25"))
         self.gap_tol = int(os.getenv("TRACK_GAP_TOL", "15"))
         self.face_thr = float(os.getenv("FACE_THRESHOLD", "0.4"))
@@ -126,6 +254,13 @@ class Tracker:
                     else:
                         pick = _pick_initial(persons, "center")
                         self.label = "face:miss→center"
+                elif self.mode == "point":
+                    pick = _pick_nearest(persons, self.target_point)
+                    if pick is None:
+                        pick = _pick_initial(persons, "center")
+                        self.label = "point:miss→center"
+                    else:
+                        self.label = "point"
                 else:
                     pick = _pick_initial(persons, self.mode)
                 self.gap = 0

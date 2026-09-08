@@ -68,6 +68,48 @@ def detect_poses(landmarker, mp_image, ts_ms: int) -> tuple[list, list]:
     return lms2d, lms3d
 
 
+def detect_poses_with_masks(landmarker, mp_image, ts_ms: int) -> tuple[list, list, list]:
+    """다인 검출 + 세그멘테이션 마스크. 마스크는 numpy float32 리스트 (실패시 [])."""
+    try:
+        res = landmarker.detect_for_video(mp_image, ts_ms)
+    except Exception:  # noqa: BLE001
+        return [], [], []
+    lms2d = [[lm_to_dict(lm) for lm in p] for p in (res.pose_landmarks or [])]
+    lms3d = [[lm_to_dict(lm) for lm in p] for p in (res.pose_world_landmarks or [])]
+    masks = []
+    for m in (res.segmentation_masks or []):
+        try:
+            import numpy as np
+            arr = np.array(m.numpy_view(), dtype=np.float32)
+            masks.append(arr)
+        except Exception:  # noqa: BLE001
+            continue
+    return lms2d, lms3d, masks
+
+
+def silhouette_from_mask(mask) -> dict | None:
+    """마스크 → {bbox, area, cx, cy} (정규화). 너무 작거나 크면 None."""
+    try:
+        import numpy as np
+        arr = np.asarray(mask)
+        if arr.ndim == 3:
+            arr = arr[..., 0]  # (H, W, 1) → (H, W)
+        binm = arr > 0.5
+        area = float(binm.mean())
+        if not (0.005 <= area <= 0.95):
+            return None
+        ys, xs = np.nonzero(binm)
+        h, w = binm.shape[:2]
+        x0, x1 = float(xs.min()) / w, float(xs.max()) / w
+        y0, y1 = float(ys.min()) / h, float(ys.max()) / h
+        return {"bbox": [round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)],
+                "area": round(area, 4),
+                "cx": round(float(xs.mean()) / w, 4),
+                "cy": round(float(ys.mean()) / h, 4)}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def detect_hands(hands, mp_image, ts_ms: int) -> list[dict]:
     """한 프레임의 손 검출 → [{side,score,landmarks[21],world[21]}]. 없으면 []."""
     try:

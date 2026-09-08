@@ -18,8 +18,8 @@ BIND = {
     'Spine2': {'parent': 'Spine1', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': None},
     'Neck': {'parent': 'Spine2', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [0.0, 0.984998, 0.172567]},
     'Head': {'parent': 'Neck', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [0.0, 0.989636, 0.143596]},
-    'LeftShoulder': {'parent': 'Spine2', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': None},
-    'RightShoulder': {'parent': 'Spine2', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': None},
+    'LeftShoulder': {'parent': 'Spine2', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [1.0, 0.0, 0.0]},
+    'RightShoulder': {'parent': 'Spine2', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [-1.0, 0.0, 0.0]},
     'LeftArm': {'parent': 'LeftShoulder', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [1.0, 0.0, 0.0]},
     'LeftForeArm': {'parent': 'LeftArm', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [1.0, 0.0, 0.0]},
     'LeftHand': {'parent': 'LeftForeArm', 'q0': [0.0, 0.0, 0.0, 1.0], 'dlocal': [1.0, 0.0, 0.0]},
@@ -39,6 +39,7 @@ BIND = {
 # rig 관절명 → 본명
 BONE_OF = {
     "Spine": "Spine", "Chest": "Spine1", "Neck": "Neck", "Head": "Head", "Hips": "Hips",
+    "LeftShoulder": "LeftShoulder", "RightShoulder": "RightShoulder",
     "LeftUpperArm": "LeftArm", "LeftLowerArm": "LeftForeArm",
     "RightUpperArm": "RightArm", "RightLowerArm": "RightForeArm",
     "LeftUpperLeg": "LeftUpLeg", "LeftLowerLeg": "LeftLeg",
@@ -48,8 +49,10 @@ BONE_OF = {
 }
 
 # 관절 타깃 방향 (world 인덱스 쌍). L=홀수=해부학적 왼쪽.
+# 어깨(쇄골): 어깨중점→각 어깨. 으쓱/앞말림 같은 견갑 움직임을 포착.
 TARGETS = {
     "Spine": ("torso",), "Chest": ("torso",), "Neck": ("neck",), "Head": ("neck",),
+    "LeftShoulder": ("shoM", 11), "RightShoulder": ("shoM", 12),
     "LeftUpperArm": (11, 13), "LeftLowerArm": (13, 15),
     "RightUpperArm": (12, 14), "RightLowerArm": (14, 16),
     "LeftUpperLeg": (23, 25), "LeftLowerLeg": (25, 27),
@@ -139,18 +142,28 @@ def _mat_to_quat(m):
 
 
 def _quat_to_euler_xyz(q):
+    # three.js Euler.setFromRotationMatrix 'XYZ' 분기와 동일.
+    # 임계값(0.9999999)과 짐벌식(atan2(m21, m11))이 핵심. 어긋나면 다축에서 수십° 오차.
     x, y, z, w = q
-    m11 = 1 - 2 * (y * y + z * z)
-    m12 = 2 * (x * y - z * w)
-    m13 = 2 * (x * z + y * w)
-    m23 = 2 * (y * z - x * w)
-    m33 = 1 - 2 * (x * x + y * y)
-    if abs(m13) >= 1.0:
-        ey = math.pi / 2 if m13 > 0 else -math.pi / 2
-        return [0.0, round(ey, 3), round(math.atan2(m12, m11), 3)]
-    return [round(math.atan2(-m23, m33), 3),
-            round(math.asin(max(-1.0, min(1.0, m13))), 3),
-            round(math.atan2(-m12, m11), 3)]
+    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    x, y, z, w = x / n, y / n, z / n, w / n
+    m00 = 1 - 2 * (y * y + z * z)
+    m01 = 2 * (x * y - w * z)
+    m02 = 2 * (x * z + w * y)
+    m11 = 1 - 2 * (x * x + z * z)
+    m12 = 2 * (y * z - w * x)
+    m21 = 2 * (y * z + w * x)
+    m22 = 1 - 2 * (x * x + y * y)
+    sy = max(-1.0, min(1.0, m02))
+    if abs(sy) >= 0.9999999:
+        ey = math.pi / 2 if sy > 0 else -math.pi / 2
+        ex = math.atan2(m21, m11)
+        ez = 0.0
+    else:
+        ey = math.asin(sy)
+        ex = math.atan2(-m12, m22)
+        ez = math.atan2(-m01, m00)
+    return [round(ex, 3), round(ey, 3), round(ez, 3)]
 
 
 def _A(p):
@@ -159,7 +172,7 @@ def _A(p):
 
 
 def solve_fk(world33: list, wrists: dict | None = None) -> dict | None:
-    """한 프레임 world 33관절 → 17관절 오일러(XYZ, 라디안). 불가시 None.
+    """한 프레임 world 33관절 → 19관절 오일러(XYZ, 라디안). 불가시 None.
 
     wrists: {"Left": [21점]|None, "Right": ...} — 손목 방향용. 없으면 포즈 기반 폴백.
     """
@@ -181,6 +194,7 @@ def solve_fk(world33: list, wrists: dict | None = None) -> dict | None:
             d_cur = _qapply(_qmul(P, Q0), BIND[bone]["dlocal"])
             al = _align(_norm(d_cur), _norm(d_target))
             Ql_new = _qmul(_qmul(_qconj(P), al), _qmul(P, Q0))
+            Ql_new = _clamp_bend(bone, Ql_new)
             Pw[bone] = _qmul(P, Ql_new)
             Ql[bone] = Ql_new
             return _quat_to_euler_xyz(Ql_new)
@@ -220,10 +234,13 @@ def solve_fk(world33: list, wrists: dict | None = None) -> dict | None:
         torso = _norm(diff(shoM, hipM))
         joints["Spine"] = displace("Spine", torso)
         joints["Chest"] = displace("Spine1", torso)
-        # Spine2·어깨는 정적
-        for b in ("Spine2", "LeftShoulder", "RightShoulder"):
-            Pw[b] = _qmul(Pav(b), BIND[b]["q0"])
-            Ql[b] = BIND[b]["q0"]
+        # Spine2는 정적 (어깨 부모 프레임 유지)
+        Pw["Spine2"] = _qmul(Pav("Spine2"), BIND["Spine2"]["q0"])
+        Ql["Spine2"] = BIND["Spine2"]["q0"]
+        # 어깨(쇄골): 어깨중점→각 어깨 방향. 으쓱/앞말림 포착.
+        # shoM이 부모(Spine2) 위치 근사라 displace 체인과 일치한다.
+        joints["LeftShoulder"] = displace("LeftShoulder", diff(shoM, _A(world33[11])))
+        joints["RightShoulder"] = displace("RightShoulder", diff(shoM, _A(world33[12])))
         nose = _A(world33[0])
         neck_dir = _norm(diff(nose, shoM))
         joints["Neck"] = displace("Neck", neck_dir)
@@ -244,6 +261,7 @@ def solve_fk(world33: list, wrists: dict | None = None) -> dict | None:
         # rig명 매핑 (LeftHand→손목은 handJoints 체계와 별개로 joints에 포함하지 않음)
         out = {k: joints[k] for k in
                ("Spine", "Chest", "Neck", "Head", "Hips",
+                "LeftShoulder", "RightShoulder",
                 "LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm",
                 "LeftUpperLeg", "LeftLowerLeg", "RightUpperLeg", "RightLowerLeg",
                 "LeftFoot", "RightFoot", "LeftToe", "RightToe")}
@@ -251,6 +269,44 @@ def solve_fk(world33: list, wrists: dict | None = None) -> dict | None:
         return out
     except (IndexError, TypeError, ValueError, KeyError, ZeroDivisionError):
         return None
+
+
+# 본별 허용 최대 굽힘각(rad). 바인드 기준 상대 회전량 기준이라 방향 보존.
+# Hips는 절대 방위라 제외 (턴 제한 금지). 오일러 norm이 아닌 쿼터니언 각도 기준.
+_BEND_LIMITS = {
+    "Spine": 0.9, "Spine1": 0.9, "Neck": 0.8, "Head": 0.5,
+    "LeftShoulder": 0.6, "RightShoulder": 0.6,
+    "LeftArm": 3.0, "RightArm": 3.0,
+    "LeftForeArm": 2.5, "RightForeArm": 2.5,
+    "LeftHand": 1.2, "RightHand": 1.2,
+    "LeftUpLeg": 3.0, "RightUpLeg": 3.0,
+    "LeftLeg": 2.5, "RightLeg": 2.5,
+    "LeftFoot": 1.2, "RightFoot": 1.2,
+    "LeftToeBase": 1.0, "RightToeBase": 1.0,
+}
+
+
+def _limit_scale() -> float:
+    """전체 한계 배율(env). 춤 종류에 따라 완화/강화."""
+    import os
+    try:
+        return max(0.2, float(os.getenv("JOINT_LIMIT_SCALE", "1.0")))
+    except ValueError:
+        return 1.0
+
+
+def _clamp_bend(bone: str, q: list) -> list:
+    """상대 회전각만 cap까지 slerp. 회전축 보존이라 방향이 틀어지지 않음."""
+    limit = _BEND_LIMITS.get(bone)
+    if limit is None:
+        return q
+    cap = limit * _limit_scale()
+    w = max(-1.0, min(1.0, q[3]))
+    ang = 2 * math.acos(abs(w))
+    if ang > cap > 0 and ang > 1e-9:
+        s = math.sin(cap / 2) / math.sin(ang / 2)
+        return [q[0] * s, q[1] * s, q[2] * s, math.cos(cap / 2) if w >= 0 else -math.cos(cap / 2)]
+    return q
 
 
 def _wrist_dir(world33, wrists, side, w_idx):

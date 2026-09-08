@@ -41,7 +41,8 @@ def to_rig(payload: dict) -> dict:
         world = f.get("poseWorldLandmarks") or []
         out.append({"frame": f.get("frame", 0), "timestamp": f.get("timestamp", 0),
                     "joints": joints, "vis": _body_vis(world) if world else 0.0,
-                    "hands": frame_hand_joints(f.get("hands") or []),
+                    "hands": frame_hand_joints(f.get("hands") or [], world,
+                                               f.get("_hand_slots")),
                     "root": list(f.get("root", [0.0, 0.0, 0.0]))})
     return {"fps": payload.get("fps", 30.0), "total_frames": payload.get("total_frames", len(out)),
             "format": "rig", "joints_list": list(RIG_JOINTS), "frames": out}
@@ -74,31 +75,41 @@ ROOT Hips
      }
     }
    }
-   JOINT LeftUpperArm
+   JOINT LeftShoulder
    {
     OFFSET -5.00 12.00 0.00
     CHANNELS 3 Zrotation Xrotation Yrotation
-    JOINT LeftLowerArm
+    JOINT LeftUpperArm
     {
-     OFFSET -25.00 0.00 0.00
+     OFFSET -10.00 0.00 0.00
      CHANNELS 3 Zrotation Xrotation Yrotation
-    End Site
+     JOINT LeftLowerArm
      {
       OFFSET -25.00 0.00 0.00
+      CHANNELS 3 Zrotation Xrotation Yrotation
+     End Site
+      {
+       OFFSET -25.00 0.00 0.00
+      }
      }
     }
    }
-   JOINT RightUpperArm
+   JOINT RightShoulder
    {
     OFFSET 5.00 12.00 0.00
     CHANNELS 3 Zrotation Xrotation Yrotation
-    JOINT RightLowerArm
+    JOINT RightUpperArm
     {
-     OFFSET 25.00 0.00 0.00
+     OFFSET 10.00 0.00 0.00
      CHANNELS 3 Zrotation Xrotation Yrotation
-    End Site
+     JOINT RightLowerArm
      {
       OFFSET 25.00 0.00 0.00
+      CHANNELS 3 Zrotation Xrotation Yrotation
+     End Site
+      {
+       OFFSET 25.00 0.00 0.00
+      }
      }
     }
    }
@@ -136,6 +147,7 @@ ROOT Hips
 """
 
 _BVH_ORDER = ("Hips", "Spine", "Chest", "Neck", "Head",
+              "LeftShoulder", "RightShoulder",
               "LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm",
               "LeftUpperLeg", "LeftLowerLeg", "RightUpperLeg", "RightLowerLeg")
 

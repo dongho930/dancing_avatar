@@ -18,7 +18,10 @@ temp_*.f*.webm
 tmp/
 tmp_verify_*
 tmp_real_*
+tmp_q5dy_*
 debug_*.mp4
+compare_*.png
+hand*.png
 job_*.json
 dl_*.mp4
 result_*.mp4

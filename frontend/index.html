@@ -19,22 +19,17 @@
     <input type="text" id="backend-url" placeholder="백엔드 URL (비우면 같은 출처)">
     <input type="password" id="api-key" placeholder="API 키 (서버에 API_KEYS 설정시 필수)">
     <input type="text" id="youtube-url" placeholder="유튜브 안무 영상 URL 입력">
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <select id="target" style="flex:1;padding:10px" title="추적 대상 (여러 명일 때)">
-        <option value="auto">대상: 자동(1명 전제)</option>
-        <option value="left">대상: 화면 왼쪽 사람</option>
-        <option value="center">대상: 중앙 사람</option>
-        <option value="right">대상: 화면 오른쪽 사람</option>
-        <option value="face">대상: 얼굴사진으로 지정</option>
-      </select>
-      <label style="flex:1;font-size:12px">기준 얼굴사진<input type="file" id="ref-photo" accept="image/*" style="padding:4px"></label>
+    <div id="preview-box" style="display:none;margin-top:8px">
+      <div style="font-size:12px;color:#ccc;margin-bottom:4px">첫 화면에서 추적할 사람을 클릭하세요 <span id="preview-status"></span></div>
+      <div id="preview-wrap" style="position:relative;width:100%;border-radius:6px;overflow:hidden">
+        <img id="preview-img" style="width:100%;display:block" alt="첫 프레임 미리보기">
+      </div>
     </div>
     <div style="display:flex;gap:6px;margin-top:6px">
       <select id="render" style="flex:1;padding:10px" title="출력 방식 (AI 영상은 참고용)">
         <option value="avatar">출력: 3D 아바타</option>
         <option value="ref">출력: 아바타 + 참고 영상</option>
       </select>
-      <label style="flex:1;font-size:12px">캐릭터 사진<input type="file" id="char-photo" accept="image/*" style="padding:4px"></label>
     </div>
     <div id="genvideo-box" style="display:none;margin-top:8px">
       <div style="font-size:12px;color:#ccc;margin-bottom:4px">참고 영상 (AI 생성, 대조용)</div>
@@ -53,7 +48,10 @@
     <div style="display:flex;gap:6px;margin-top:6px">
       <button id="bvh-btn" style="flex:1" onclick="downloadBVH()" disabled>BVH 저장</button>
     </div>
-    <button onclick="processYoutube()">안무 따기</button>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button style="flex:1" onclick="requestPreview()">첫 화면 미리보기</button>
+      <button style="flex:2" onclick="processYoutube()">안무 따기</button>
+    </div>
     <button id="replay-btn" onclick="replayMotion()" disabled>안무 재생</button>
     <div id="loading">백엔드에서 모션 추출 중... (약 10~20초 소요)</div>
     <progress id="progress" max="100" value="0"></progress>
@@ -61,10 +59,10 @@
 
   <div id="canvas-container"></div>
 
-  <script src="js/config.js"></script>
-  <script src="js/scene.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/player.js"></script>
-  <script src="js/ui.js"></script>
+  <script src="js/config.js?v=20260907"></script>
+  <script src="js/scene.js?v=20260907"></script>
+  <script src="js/api.js?v=20260907"></script>
+  <script src="js/player.js?v=20260907"></script>
+  <script src="js/ui.js?v=20260907"></script>
 </body>
 </html>

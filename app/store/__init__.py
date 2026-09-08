@@ -194,7 +194,8 @@ class HybridJobStore:
                 p = os.path.join(tmp, name)
                 try:
                     if now - os.path.getmtime(p) > ttl and (
-                        name.startswith("job_") or name.startswith("dl_") or name.startswith("temp_")):
+                        name.startswith("job_") or name.startswith("dl_") or name.startswith("temp_")
+                        or name.startswith("cache_") or name.startswith("preview_")):
                         os.remove(p)
                         removed += 1
                 except OSError:

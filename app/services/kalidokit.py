@@ -8,9 +8,22 @@
 출력: Mixamo 본 이름 → [x,y,z] 라디안. Neck은 Kalidokit에 없어 별도 계산(호출부).
 """
 import math
+import os
 
 PI = math.pi
 TWO_PI = math.pi * 2
+
+
+def _finger_deadzone() -> float:
+    """정규화 각도 deadzone. 이하 미세 굽힘은 노이즈로 보고 0 처리."""
+    try:
+        return max(0.0, float(os.getenv("FINGER_DEADZONE", "0.045")))
+    except ValueError:
+        return 0.045
+
+
+def _dz(v: float, dz: float) -> float:
+    return 0.0 if abs(v) < dz else v
 
 
 def _num(p, k, default=0.0):
@@ -346,23 +359,37 @@ def solve_hand(lm21: list, side: str = "Right") -> dict | None:
         return None
 
 
+def _nan0(v: float) -> float:
+    """JS `|| 0` 대응. NaN만 0으로 (0.0은 그대로)."""
+    return 0.0 if isinstance(v, float) and math.isnan(v) else v
+
+
 def _roll_pitch_yaw_vec(a, b, c):
+    # 원본과 동일하게 0除算 NaN을 전파 후 || 0 처리. 임의 fallback 금지.
     ab = _sub(b, a)
     ac = _sub(c, a)
     n = _cross(ab, ac)
     nn = _len(n)
-    uz = [n[0] / nn, n[1] / nn, n[2] / nn] if nn > 1e-9 else [0.0, 0.0, 1.0]
+    if nn != 0:
+        uz = [n[0] / nn, n[1] / nn, n[2] / nn]
+    else:
+        uz = [float("nan")] * 3
     na = _len(ab)
-    ux = [ab[0] / na, ab[1] / na, ab[2] / na] if na > 1e-9 else [1.0, 0.0, 0.0]
+    if na != 0:
+        ux = [ab[0] / na, ab[1] / na, ab[2] / na]
+    else:
+        ux = [float("nan")] * 3
     uy = _cross(uz, ux)
-    beta = math.asin(max(-1.0, min(1.0, uz[0]))) or 0.0
-    alpha = math.atan2(-uz[1], uz[2]) or 0.0
-    gamma = math.atan2(-uy[0], ux[0]) or 0.0
+    z0 = uz[0]
+    beta = _nan0(math.asin(max(-1.0, min(1.0, z0)))) if z0 == z0 else 0.0
+    alpha = _nan0(math.atan2(-uz[1], uz[2]))
+    gamma = _nan0(math.atan2(-uy[0], ux[0]))
     return [_normalize_angle(alpha), _normalize_angle(beta), _normalize_angle(gamma)]
 
 
 def _rig_fingers(hand: dict, side: str) -> dict:
     invert = 1 if side == "Right" else -1
+    dz = _finger_deadzone()
     w = hand["Wrist"]
     hand["Wrist"] = [_clamp(w[0] * 2 * invert, -0.3, 0.3),
                      _clamp(w[1] * 2.3,
@@ -372,6 +399,7 @@ def _rig_fingers(hand: dict, side: str) -> dict:
     for e in _HAND_DIGITS:
         for j in _HAND_SEGS:
             t = hand[e + j]
+            t = [t[0], t[1], _dz(t[2], dz)]
             if e == "Thumb":
                 damp = {"x": 2.2 if j == "Proximal" else 0,
                         "y": 2.2 if j == "Proximal" else (0.7 if j == "Intermediate" else 1),

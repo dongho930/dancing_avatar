@@ -18,7 +18,8 @@ def create_motion_job(req: YouTubeRequest, request: Request,
     job = store.create(str(req.url))
     background_tasks.add_task(run_motion_job, job.id, str(req.url),
                               req.target, req.ref_image_b64 or "",
-                              req.render, req.char_image_b64 or "")
+                              req.render, req.char_image_b64 or "",
+                              req.target_point)
     return JobCreated(
         job_id=job.id,
         status_url=f"/api/v1/motions/{job.id}",

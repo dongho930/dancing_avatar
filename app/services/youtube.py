@@ -69,3 +69,35 @@ def download_youtube(url: str, out_path: str, cookies_path: str = "cookies.txt",
                 return cand
         raise FileNotFoundError("동영상 파일 생성 실패")
     return out_path
+
+
+def url_hash(url: str) -> str:
+    """URL → 16자리 캐시 키. 미리보기와 본 잡이 같은 영상을 공유."""
+    import hashlib
+    return hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+
+
+def url_cache_path(tmp_dir: str, url: str) -> str:
+    return os.path.join(tmp_dir, f"cache_{url_hash(url)}.mp4")
+
+
+def download_cached(url: str, tmp_dir: str, ttl_sec: int = 3600,
+                    cookies_path: str = "cookies.txt",
+                    progress_cb: Callable[[str], None] | None = None) -> tuple[str, bool]:
+    """신선한 캐시가 있으면 재사용 (True), 없으면 다운로드 후 캐시 저장.
+
+    미리보기와 본 잡이 같은 파일을 공유해 다운로드를 1회로 줄인다.
+    """
+    import time
+    os.makedirs(tmp_dir, exist_ok=True)
+    cpath = url_cache_path(tmp_dir, url)
+    if os.path.exists(cpath) and time.time() - os.path.getmtime(cpath) < ttl_sec:
+        if progress_cb:
+            progress_cb("캐시된 영상 재사용")
+        return cpath, True
+    tmp_dl = cpath + ".downloading"
+    got = download_youtube(url, tmp_dl, cookies_path=cookies_path, progress_cb=progress_cb)
+    if os.path.exists(cpath):
+        os.remove(cpath)
+    os.replace(got, cpath)
+    return cpath, False
