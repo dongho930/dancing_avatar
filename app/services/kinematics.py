@@ -424,14 +424,205 @@ def _fk_max_step() -> float:
         return 0.45
 
 
-def _slew(prev_v, cur_v, step: float) -> list:
-    """wrap-aware slew 제한. ±π 경계 crossing도 연속으로 처리."""
-    out = []
-    for p, c in zip(prev_v, cur_v):
-        d = (c - p + math.pi) % (2 * math.pi) - math.pi
-        d = max(-step, min(step, d))
-        out.append(round(p + d, 3))
-    return out
+def _euler_to_quat_xyz(e) -> list:
+    """오일러 XYZ → quaternion. _quat_to_euler_xyz의 역변환 (R=Rx·Ry·Rz)."""
+    try:
+        hx, hy, hz = float(e[0]) / 2, float(e[1]) / 2, float(e[2]) / 2
+    except (IndexError, TypeError, ValueError):
+        return [0.0, 0.0, 0.0, 1.0]
+    sx, cx, sy, cy, sz, cz = (math.sin(hx), math.cos(hx), math.sin(hy),
+                              math.cos(hy), math.sin(hz), math.cos(hz))
+    qx = [sx, 0.0, 0.0, cx]
+    qy = [0.0, sy, 0.0, cy]
+    qz = [0.0, 0.0, sz, cz]
+    return _qmul(_qmul(qx, qy), qz)
+
+
+def _qmul(a, b):
+    x1, y1, z1, w1 = a
+    x2, y2, z2, w2 = b
+    return [w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2]
+
+
+def _slew_quat(prev_e, cur_e, step: float) -> list:
+    """쿼터니언 공간 slew 제한. 오일러 분기 절단(branch cut) 와인드업 방지.
+
+    기존 성분별 _slew는 팔이 빠르게 돌 때 표현이 π↔-π로 뒤집히면
+    필터가 턴을 누적해 수십 rad까지 발산했음 (실측 RightUpperArm 20.9).
+    최단호 slerp는 그럴 수 없다. X/Y/Z 순서·짐벌 처리는 기존과 동일.
+    """
+    qp = _euler_to_quat_xyz(prev_e)
+    qc = _euler_to_quat_xyz(cur_e)
+    dot = max(-1.0, min(1.0, sum(a * b for a, b in zip(qp, qc))))
+    if dot < 0:
+        qc = [-c for c in qc]
+        dot = -dot
+    ang = 2 * math.acos(max(-1.0, min(1.0, dot)))
+    if ang <= step or ang < 1e-9:
+        return [round(float(c), 3) for c in cur_e]
+    t = step / ang
+    if ang > math.pi - 1e-6:  # 정반대: 직선 보간 + 정규화 (희귀)
+        q = [a + (b - a) * t for a, b in zip(qp, qc)]
+    else:
+        s0 = math.sin((1 - t) * ang) / math.sin(ang)
+        s1 = math.sin(t * ang) / math.sin(ang)
+        q = [a * s0 + b * s1 for a, b in zip(qp, qc)]
+    return list(_quat_to_euler_xyz(q))
+
+
+def _sho_ref(world) -> dict | None:
+    """어깨 기준점: 첫 유효 프레임의 어깨중점/힙중점 (아바타 공간).
+
+    힙이 운반하므로 병진 이동에 불변, 으쓱만 남는다. 가시성 낮으면 None.
+    """
+    try:
+        if not world or len(world) < 33:
+            return None
+        if not (_joint_ok(world, "LeftShoulder") and _joint_ok(world, "RightShoulder")):
+            return None
+
+        def _a(i):
+            p = world[i]
+            return (float(p.get("x", 0)), -float(p.get("y", 0)), -float(p.get("z", 0)))
+
+        lsh, rsh = _a(11), _a(12)
+        shoM = [(lsh[k] + rsh[k]) / 2 for k in range(3)]
+        lhip, rhip = _a(23), _a(24)
+        hipM = [(lhip[k] + rhip[k]) / 2 for k in range(3)]
+        return {"shoM": shoM, "hipM": hipM}
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def _neck_ref(world) -> dict | None:
+    """목 기준 방향: 첫 유효 프레임의 코-어깨중점 (아바타 공간).
+
+    카메라 앵글 상수 오프셋 제거용. 코 가시성 낮으면 None.
+    """
+    try:
+        if not world or len(world) < 33:
+            return None
+        if not _joint_ok(world, "Neck"):
+            return None
+
+        def _a(i):
+            p = world[i]
+            return (float(p.get("x", 0)), -float(p.get("y", 0)), -float(p.get("z", 0)))
+
+        lsh, rsh, nose = _a(11), _a(12), _a(0)
+        shoM = [(lsh[k] + rsh[k]) / 2 for k in range(3)]
+        d = [nose[k] - shoM[k] for k in range(3)]
+        n = math.sqrt(sum(c * c for c in d))
+        if n < 1e-9:
+            return None
+        return {"dir": [c / n for c in d]}
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def _leg_smooth_win() -> int:
+    """다리 스무딩 윈도우 (홀수, 1=끄기). 중앙값이 아닌 쿼터니언 평균."""
+    try:
+        w = int(os.getenv("LEG_SMOOTH", "3"))
+        return w if w >= 3 and w % 2 == 1 else (3 if w > 1 else 1)
+    except ValueError:
+        return 3
+
+
+LEG_SMOOTH_JOINTS = ("LeftUpperLeg", "LeftLowerLeg", "RightUpperLeg", "RightLowerLeg",
+                     "LeftFoot", "RightFoot")
+
+
+def attach_leg_smooth(payload: dict) -> dict:
+    """다리 떨림 제거: 중앙 윈도우 쿼터니언 평균 (오프라인 후처리).
+
+    slew(속도 제한)는 떨림 대역(0.05~0.2rad/frame)을 못 잡는다.
+    팔은 스냅 유지하려고 다리만. 경계는 윈도우 축소.
+    """
+    win = _leg_smooth_win()
+    frames = payload.get("frames", [])
+    if win <= 1 or not frames:
+        return payload
+    half = win // 2
+    for name in LEG_SMOOTH_JOINTS:
+        seq = []
+        for f in frames:
+            e = (f.get("fkJoints") or {}).get(name) or [0.0, 0.0, 0.0]
+            seq.append(_euler_to_quat_xyz(e))
+        # 부호 정렬 (첫 프레임 기준) 후 평균
+        base = seq[0]
+        alg = []
+        for q in seq:
+            d = sum(a * b for a, b in zip(base, q))
+            alg.append([-c for c in q] if d < 0 else list(q))
+        sm = []
+        n = len(alg)
+        for i in range(n):
+            lo, hi = max(0, i - half), min(n, i + half + 1)
+            cnt = hi - lo
+            avg = [sum(alg[j][k] for j in range(lo, hi)) / cnt for k in range(4)]
+            m = math.sqrt(sum(c * c for c in avg)) or 1.0
+            sm.append([c / m for c in avg])
+        for f, q in zip(frames, sm):
+            try:
+                (f.get("fkJoints") or {})[name] = list(_quat_to_euler_xyz(q))
+            except (AttributeError, TypeError):
+                continue
+    return payload
+
+
+def _midspine_enabled() -> bool:
+    return os.getenv("MIDSPINE_ENABLED", "1").strip() not in ("0", "false", "no")
+
+
+def _waist_avatar(world, lm2d, mid) -> dict | None:
+    """실측 허리 → 아바타 공간 절대 위치 {"pos": [...]}. 불가시 None.
+
+    이미지 정규화 좌표를 몸통 길이비로 아바타 단위로 환산.
+    z는 양끝 보간 (pitch kink는 depth 후속 과제).
+    """
+    try:
+        if not world or len(world) < 33 or not lm2d or len(lm2d) < 29:
+            return None
+        if not mid or not mid.get("waist"):
+            return None
+
+        def _a2(i):
+            p = lm2d[i]
+            return (float(p.get("x", 0.5)), float(p.get("y", 0.5)))
+
+        def _a3(i):
+            p = world[i]
+            return (float(p.get("x", 0)), -float(p.get("y", 0)), -float(p.get("z", 0)))
+
+        hx2 = ((_a2(23)[0] + _a2(24)[0]) / 2, (_a2(23)[1] + _a2(24)[1]) / 2)
+        sh2 = ((_a2(11)[0] + _a2(12)[0]) / 2, (_a2(11)[1] + _a2(12)[1]) / 2)
+        h3, s3 = _a3(23), _a3(24)
+        hipM = ((h3[0] + s3[0]) / 2, (h3[1] + s3[1]) / 2, (h3[2] + s3[2]) / 2)
+        l3, r3 = _a3(11), _a3(12)
+        shoM = ((l3[0] + r3[0]) / 2, (l3[1] + r3[1]) / 2, (l3[2] + r3[2]) / 2)
+        Tl = math.sqrt(sum((shoM[k] - hipM[k]) ** 2 for k in range(3)))
+        Ti = math.hypot(sh2[0] - hx2[0], sh2[1] - hx2[1])
+        if Tl < 1e-9 or Ti < 1e-9:
+            return None
+        sc = Tl / Ti
+        wx, wy = float(mid["waist"][0]), float(mid["waist"][1])
+        # x: 동일 부호. y: 아바타 y = -이미지 y라 부호 반전. z: 양끝 보간.
+        pos = [hipM[0] + (wx - hx2[0]) * sc,
+               hipM[1] - (wy - hx2[1]) * sc,
+               0.0]
+        t = ((wx - hx2[0]) * (sh2[0] - hx2[0]) + (wy - hx2[1]) * (sh2[1] - hx2[1])) / (Ti * Ti)
+        t = max(0.0, min(1.0, t))
+        pos[2] = hipM[2] + (shoM[2] - hipM[2]) * t
+        # sanity: 몸통에서 크게 벗어나면 버림
+        if math.sqrt(sum((pos[k] - hipM[k]) ** 2 for k in range(3))) > 2.0 * Tl:
+            return None
+        return {"pos": [round(c, 4) for c in pos]}
+    except (IndexError, TypeError, ValueError, AttributeError, KeyError):
+        return None
 
 
 def attach_fk_joints(payload: dict) -> dict:
@@ -439,17 +630,27 @@ def attach_fk_joints(payload: dict) -> dict:
     from app.services.fk import solve_fk
     step = _fk_max_step()
     prev: dict = {}
+    sho_ref: dict | None = None
+    neck_ref: dict | None = None
     for f in payload.get("frames", []):
         world = f.get("poseWorldLandmarks") or []
+        if sho_ref is None:
+            sho_ref = _sho_ref(world)
+        if neck_ref is None:
+            neck_ref = _neck_ref(world)
+        spm = None
+        if _midspine_enabled():
+            spm = _waist_avatar(world, f.get("poseLandmarks") or [], f.get("midSpine"))
         fk = solve_fk(world, wrist_landmarks(f.get("hands") or [], world,
-                                              f.get("_hand_slots"))) or {}
+                                              f.get("_hand_slots")),
+                      sho_ref=sho_ref, neck_ref=neck_ref, spine_mid=spm) or {}
         joints = fk  # solve_fk는 _wrist 채널 포함
         held = {}
         for name in RIG_JOINTS:
             if name in joints and _joint_ok(world, name):
                 cur = [round(float(c), 3) for c in joints[name]]
                 if name in prev:
-                    cur = _slew(prev[name], cur, step)
+                    cur = _slew_quat(prev[name], cur, step)
                 prev[name] = cur
                 held[name] = cur
             elif name in prev:
@@ -479,12 +680,17 @@ def attach_fk_joints(payload: dict) -> dict:
 
 
 def attach_neck_head(payload: dict) -> dict:
-    """full 페이로드 각 프레임에 neckJoints {neck, head=neck×0.5} 주입."""
+    """full 페이로드 각 프레임에 neckJoints {neck, head=neck×0.5} 주입.
+
+    어깨중점→코 (한쪽 어깨가 아닌 중심 기준. 옆치우침 방지).
+    """
     for f in payload.get("frames", []):
         world = f.get("poseWorldLandmarks") or []
         if world and len(world) >= 29:
             try:
-                neck = list(_bone_euler(world, L_SH, NOSE, ref=UP))
+                pl, pr, pn = _pt(world, L_SH), _pt(world, R_SH), _pt(world, NOSE)
+                shoM = ((pl[0] + pr[0]) / 2, (pl[1] + pr[1]) / 2, (pl[2] + pr[2]) / 2)
+                neck = list(_quat_to_euler_xyz(_quat_from_to(UP, _norm(_v(shoM, pn)))))
             except (IndexError, TypeError, ValueError):
                 neck = [0.0, 0.0, 0.0]
         else:

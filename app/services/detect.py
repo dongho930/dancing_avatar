@@ -110,6 +110,73 @@ def silhouette_from_mask(mask) -> dict | None:
         return None
 
 
+def spine_from_mask(mask, sho_xy, hip_xy) -> dict | None:
+    """마스크 중앙선 → {waist:[x,y], mid:[x,y]} (정규화). 실패시 None.
+
+    sho_xy/hip_xy: 어깨중점/힙중점 (x, y 정규화). 어깨~힙 행 밴드에서
+    체축을 포함한 run만 취해 팔을 분리, 행별 중심선을 평활화.
+    허리 = 중간 60% 중 최소 폭 행 ( natural waist hinge ).
+    """
+    try:
+        import numpy as np
+        arr = np.asarray(mask)
+        if arr.ndim == 3:
+            arr = arr[..., 0]
+        h, w = arr.shape[:2]
+        if h < 20 or w < 20:
+            return None
+        binm = arr > 0.5
+        sx, sy = float(sho_xy[0]) * w, float(sho_xy[1]) * h
+        hx, hy = float(hip_xy[0]) * w, float(hip_xy[1]) * h
+        y0 = max(0, int(min(sy, hy)))
+        y1 = min(h - 1, int(max(sy, hy)))
+        if y1 - y0 < 8:
+            return None
+        denom = (hy - sy) if abs(hy - sy) > 1e-9 else 1.0
+        cxs: list = []
+        widths: list = []
+        ys: list = []
+        for y in range(y0, y1 + 1):
+            row = binm[y]
+            if not row.any():
+                continue
+            t = (y - sy) / denom
+            ax = sx + (hx - sx) * max(0.0, min(1.0, t))
+            xs = np.nonzero(row)[0]
+            gaps = np.nonzero(np.diff(xs) > 3)[0]
+            lo, hi, found = xs[0], xs[-1], False
+            prev = xs[0]
+            for b in gaps:
+                if prev - 1 <= ax <= xs[b] + 1:
+                    lo, hi, found = prev, xs[b], True
+                    break
+                prev = xs[b + 1]
+            if not found:
+                if prev - 1 <= ax <= xs[-1] + 1:
+                    lo, hi, found = prev, xs[-1], True
+            if not found:
+                continue
+            cxs.append((lo + hi) / 2)
+            widths.append(hi - lo + 1)
+            ys.append(y)
+        if len(ys) < 5:
+            return None
+        k = max(1, len(ys) // 8)
+        sm = []
+        for i in range(len(cxs)):
+            lo = max(0, i - k)
+            hi = min(len(cxs), i + k + 1)
+            sm.append(sum(cxs[lo:hi]) / (hi - lo))
+        n = len(ys)
+        a, b = n // 5, n - n // 5
+        wi = min(range(a, b), key=lambda i: widths[i])
+        mi = n // 2
+        return {"waist": [round(float(sm[wi] / w), 4), round(float(ys[wi] / h), 4)],
+                "mid": [round(float(sm[mi] / w), 4), round(float(ys[mi] / h), 4)]}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def detect_hands(hands, mp_image, ts_ms: int) -> list[dict]:
     """한 프레임의 손 검출 → [{side,score,landmarks[21],world[21]}]. 없으면 []."""
     try:

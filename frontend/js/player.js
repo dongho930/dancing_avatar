@@ -57,10 +57,7 @@ function playMotion(motionData) {
     }
     // 서버 FK가 있으면 그대로 적용 (모델상대값이라 감쇠 불필요). 구 저장분만 Kalidokit 폴백.
     if (frame.fkJoints) {
-      for (const [name, e] of Object.entries(frame.fkJoints)) {
-        const bone = rigNodes[name];
-        if (bone && e && e.length === 3) dampQuat(bone, e[0], e[1], e[2]);
-      }
+      applyFK(frame.fkJoints);
     } else {
     const lms = frame;
     if ((lms.poseWorldLandmarks || []).length > 0 && (lms.poseLandmarks || []).length > 0) {

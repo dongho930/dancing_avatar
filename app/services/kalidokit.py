@@ -389,6 +389,9 @@ def _roll_pitch_yaw_vec(a, b, c):
 
 def _rig_fingers(hand: dict, side: str) -> dict:
     invert = 1 if side == "Right" else -1
+    # 굽힘 부호: 아바타 바인드 실측 기준 손가락 굽힘축은 로컬 X.
+    # 왼쪽 -X, 오른쪽 +X가 손바닥 쪽 굽힘. Z에 넣으면 옆/위쪽 꺾임이 된다.
+    flex = -1.0 if side == "Left" else 1.0
     dz = _finger_deadzone()
     w = hand["Wrist"]
     hand["Wrist"] = [_clamp(w[0] * 2 * invert, -0.3, 0.3),
@@ -408,23 +411,21 @@ def _rig_fingers(hand: dict, side: str) -> dict:
                          "y": (1.1 if j == "Proximal" else 0.1) * invert,
                          "z": 0.2 * invert}
                 if j == "Proximal":
-                    nz = _clamp(start["z"] + t[2] * -PI * damp["z"] * invert,
-                                -0.6 if side == "Right" else -0.3,
-                                0.3 if side == "Right" else 0.6)
                     nx = _clamp(start["x"] + t[2] * -PI * damp["x"], -0.6, 0.3)
                     ny = _clamp(start["y"] + t[2] * -PI * damp["y"] * invert,
                                 -1 if side == "Right" else -0.3,
                                 0.3 if side == "Right" else 1)
                 else:
-                    nz = _clamp(start["z"] + t[2] * -PI * damp["z"] * invert, -2, 2)
                     nx = _clamp(start["x"] + t[2] * -PI * damp["x"], -2, 2)
                     ny = _clamp(start["y"] + t[2] * -PI * damp["y"] * invert, -2, 2)
-                hand[e + j] = [nx, ny, nz]
+                    # 비근위 마디의 굽힘은 Z에만 있었으므로 X로 이관
+                    nx += flex * abs(t[2] * PI * damp["z"])
+                hand[e + j] = [nx, ny, 0.0]
             else:
-                hand[e + j] = [t[0], t[1],
-                               _clamp(t[2] * -PI * invert,
-                                      -PI if side == "Right" else 0,
-                                      0 if side == "Right" else PI)]
+                m = abs(_clamp(t[2] * -PI * invert,
+                               -PI if side == "Right" else 0,
+                               0 if side == "Right" else PI))
+                hand[e + j] = [flex * m, 0.0, 0.0]
     return hand
 
 

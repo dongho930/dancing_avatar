@@ -48,8 +48,34 @@ def step_extract(ctx: dict) -> None:
         target_point=ctx.get("target_point"))
 
 
+def step_smpl_fetch(ctx: dict) -> None:
+    """SMPL GPU 워커 조회 (선택). 실패해도 잡은 계속 (FK 폴백).
+
+    우선순위: 수동 SMPL_PKL 파일 > URL 캐시 > 워커 호출.
+    결과 rows는 ctx에 보관, enrich에서 이식.
+    """
+    import os
+    if os.getenv("SMPL_PKL", "").strip():
+        return  # 수동 파일은 enrich에서 직접 처리
+    from app.core.config import get_settings
+    from app.services import smplcloud
+    from app.services.youtube import url_hash
+    if not smplcloud.space_enabled():
+        return
+    settings = get_settings()
+    store.update(ctx["job_id"], message="SMPL 정제 요청 중")
+    rows = smplcloud.fetch_smpl(
+        ctx.get("video_path", ""), settings.tmp_dir, url_hash(ctx["url"]),
+        progress_cb=lambda m: store.update(ctx["job_id"], message=m))
+    if rows is not None:
+        ctx["smpl_rows"] = rows
+        store.update(ctx["job_id"], message=f"SMPL 정제 수신 ({len(rows)}프레임)")
+    else:
+        store.update(ctx["job_id"], message="SMPL 없이 진행 (FK)")
+
+
 def step_enrich(ctx: dict) -> None:
-    """손가락·발·목 회전값 + 루트모션 주입 (저장 전)."""
+    """손가락·발·목 회전값 + 루트모션 + 지면 보정 주입 (저장 전)."""
     from app.services.kinematics import (
         attach_fk_joints,
         attach_foot_joints,
@@ -61,7 +87,13 @@ def step_enrich(ctx: dict) -> None:
     attach_foot_joints(ctx["result"])
     attach_neck_head(ctx["result"])
     attach_fk_joints(ctx["result"])
+    from app.services.smplxfer import attach_smpl_refine
+    attach_smpl_refine(ctx["result"], rows=ctx.get("smpl_rows"))  # 수동 파일·클라우드rows·스킵
+    from app.services.kinematics import attach_leg_smooth
+    attach_leg_smooth(ctx["result"])  # 다리 떨림 제거 (FK 다음, root 이전 무관)
     attach_root(ctx["result"])
+    from app.services.ground import attach_ground
+    attach_ground(ctx["result"])  # fkJoints(무릎) + root 다음. 지면 뚫림 보정.
 
 
 def step_save(ctx: dict) -> None:

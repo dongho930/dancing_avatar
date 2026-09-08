@@ -1,0 +1,16 @@
+# ZeroGPU 런타임용. torch는 CUDA 포함 휠 (기본 index).
+torch
+einops
+timm
+yacs
+smplx
+loguru
+ultralytics
+opencv-python-headless
+numpy
+scipy
+scikit-image
+joblib
+spaces
+gradio
+gdown

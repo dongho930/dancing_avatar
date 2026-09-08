@@ -2,7 +2,7 @@
 
 target: auto(1명 전제) | left | center | right | face(기준사진 필요)
 반환: {fps, total_frames, img_w, img_h, target:{mode,label,persons_max},
-       frames:[{frame,timestamp,poseWorldLandmarks,poseLandmarks,hands,persons,lost,flow_filled,silhouette,depth}]}
+       frames:[{frame,timestamp,poseWorldLandmarks,poseLandmarks,hands,persons,lost,flow_filled,silhouette,depth,midSpine}]}
 얼굴 표정은 의도적으로 미지원.
 """
 import os
@@ -14,6 +14,8 @@ from app.services.detect import (
     ensure_hand_model,
     ensure_pose_model,
     null_context,
+    silhouette_from_mask,
+    spine_from_mask,
 )
 from app.services.flow import MIN_VALID, advect_points, compute_flow, flow_enabled, small_gray
 from app.services.tracking import Tracker, _person_entries, assign_hands
@@ -96,7 +98,7 @@ def process_video_pose(video_path: str, max_frames: int = 900,
                     ts_ms = int(frame_idx / fps * 1000) if fps > 0 else frame_idx * 33
                     gray, _, _ = small_gray(frame) if flow_on else (None, 0, 0)
                     if sil_on:
-                        from app.services.detect import detect_poses_with_masks, silhouette_from_mask
+                        from app.services.detect import detect_poses_with_masks
                         lms2d, lms3d, masks = detect_poses_with_masks(landmarker, mp_image, ts_ms)
                     else:
                         lms2d, lms3d = detect_poses(landmarker, mp_image, ts_ms)
@@ -107,6 +109,21 @@ def process_video_pose(video_path: str, max_frames: int = 900,
                     sil = None
                     if sil_on and pick is not None and pick < len(masks):
                         sil = silhouette_from_mask(masks[pick])
+                    mid = None
+                    if (sil_on and pick is not None and pick < len(masks)
+                            and lms2d_pick and len(lms2d_pick) >= 29):
+                        try:
+                            shx = (float(lms2d_pick[11].get("x", 0.5))
+                                   + float(lms2d_pick[12].get("x", 0.5))) / 2
+                            shy = (float(lms2d_pick[11].get("y", 0.5))
+                                   + float(lms2d_pick[12].get("y", 0.5))) / 2
+                            hxx = (float(lms2d_pick[23].get("x", 0.5))
+                                   + float(lms2d_pick[24].get("x", 0.5))) / 2
+                            hyy = (float(lms2d_pick[23].get("y", 0.5))
+                                   + float(lms2d_pick[24].get("y", 0.5))) / 2
+                            mid = spine_from_mask(masks[pick], (shx, shy), (hxx, hyy))
+                        except (IndexError, TypeError, ValueError, AttributeError):
+                            mid = None
                     dep = None
                     if lms2d_pick:
                         from app.services.depth import depth_enabled, estimate_depth, sample_hip_depth
@@ -134,6 +151,7 @@ def process_video_pose(video_path: str, max_frames: int = 900,
                         "flow_filled": flow_filled,
                         "silhouette": sil,
                         "depth": dep,
+                        "midSpine": mid,
                     })
                     if flow_on:
                         prev_gray = gray
@@ -196,6 +214,7 @@ def _legacy_process(cv2, mp, video_path: str, max_frames: int,
                 "hands": [],  # legacy(mp.solutions) 경로: 손 미지원
                 "persons": 1 if landmarks_2d else 0,
                 "lost": not bool(landmarks_2d),
+                "midSpine": None,
             })
             frame_idx += 1
             if progress_cb and frame_idx % 30 == 0:

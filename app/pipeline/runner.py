@@ -16,6 +16,7 @@ def run_motion_job(job_id: str, url: str,
     try:
         steps.step_download(ctx)
         steps.step_extract(ctx)
+        steps.step_smpl_fetch(ctx)
         steps.step_enrich(ctx)
         steps.step_save(ctx)
         steps.step_audio(ctx)
